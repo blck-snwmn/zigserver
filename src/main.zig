@@ -1,24 +1,27 @@
 const std = @import("std");
 
 pub fn main() !void {
-    // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
+    var server = std.http.Server.init(std.heap.page_allocator, .{ .reuse_address = true });
+    defer server.deinit();
 
-    // stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
-    const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
+    try server.listen(try std.net.Address.parseIp("127.0.0.1", 8080));
 
-    try stdout.print("Run `zig build test` to run the tests.\n", .{});
+    while (true) {
+        const res = try server.accept(.{ .dynamic = 8192 });
 
-    try bw.flush(); // don't forget to flush!
+        const thread = try std.Thread.spawn(.{}, handler, .{res});
+        thread.detach();
+    }
 }
 
-test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit(); // try commenting this out and see if zig detects the memory leak!
-    try list.append(42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
+fn handler(res: *std.http.Server.Response) !void {
+    defer res.reset();
+
+    try res.wait();
+    std.debug.print("requested: {}\n", .{res.request});
+    const message = "Hello, World!\nThis is a zig http server.\n";
+
+    res.transfer_encoding = .{ .content_length = message.len };
+    try res.do();
+    _ = try res.write(message);
 }
